@@ -9,12 +9,11 @@ import sys
 sys.path.append('../../../../infrastructure/tools')
 from utilities import *
 from plotting import *
-import asyncio
-from openai import AsyncOpenAI
 from loguru import logger
+from prompt_request import prompt_request
+import asyncio
 
-
-sample_ratio = 0.1
+# sample_ratio = 0.1
 
 
 async def generate_response(request, OPENAI_API_KEY):
@@ -31,7 +30,7 @@ async def generate_response(request, OPENAI_API_KEY):
         return None
 
 
-async def main():
+def main():
 
     raw_data = pd.read_csv("../../../data/complaints.csv")
 
@@ -39,40 +38,48 @@ async def main():
 
     raw_data = raw_data.rename(columns={'Unnamed: 0': 'complaint_id'})
 
-    sample = raw_data.sample(frac=sample_ratio, random_state=123).reset_index(drop=True)
+    # sample = raw_data.sample(frac=sample_ratio, random_state=123).reset_index(drop=True)
 
     with open("../../../../api_keys/openai_api.txt", "r") as password_file:  # Open in binary read mode
 
         password = password_file.read()
 
 
-    sample['chatgpt_keyword_extraction'] = 'unknown'
+    raw_data['chatgpt_keyword_extraction'] = 'unknown'
 
     # labels = [p for p in sample['product'].unique()]
 
-    messages = []
 
-    for i in range(sample.shape[0]):
+    with open("../../../../api_keys/openai_api.txt", "r") as password_file:  # Open in binary read mode
 
-        request = 'Summarize the following context? context:' + f"{sample.at[i, 'narrative']}"
+        password = password_file.read()
 
-        messages.append(request)
+    openai = prompt_request(password)
 
-    logger.info(f'Begin OpenAi requests: # of requests {sample.shape[0]}')
+    batch_size = 20000
 
-    tasks = [generate_response(p, password) for p in messages]
+    current_row = 0
 
-    responses = await asyncio.gather(*tasks)
+    summary = []
+
+    while current_row < raw_data.shape[0]:
+
+        sample = raw_data.loc[current_row:min(raw_data.shape[0], current_row + batch_size), 'narrative']
+
+        current_row += batch_size
+
+        requests = sample.tolist()
+
+        requests = ['Summarize the following context: '+r for r in requests]
+
+        summary += openai.submit_requests(requests)
+
+    raw_data['narrative_summary'] = summary
+
+    sample.to_csv('../../../data/intermediate/raw_gpt_labeled.csv', index=False)
 
 
-    for i, response in enumerate(responses):
-        if response:
-            sample.at[i, 'chatgpt_keyword_extraction'] = response
-
-    logger.info(f'Received returned OpenAi requests: # of requests {sample.shape[0]}')
-
-    sample.to_csv('../../../data/intermediate/sample_gpt_labeled.csv', index=False)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
